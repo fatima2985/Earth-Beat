@@ -148,7 +148,7 @@ function setup() {
   });
   
   // Label to explain the slider's functionality
-  let sliderLabel = createDiv('Slide to view Earth images from 2015-2024 via NASA EPIC API');
+  let sliderLabel = createDiv('Slide to view Earth images from 2016-2024 via NASA EPIC API');
   sliderLabel.position(10, height - 80);
   sliderLabel.style('color', 'white');
   sliderLabel.style('font-size', '14px');
