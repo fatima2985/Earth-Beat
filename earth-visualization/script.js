@@ -6,10 +6,22 @@ let slider;
 let earthImage = null;
 let earthImages = [];  // Array to hold generated Earth images
 let epicData = {};
+let climateData = {  // New separate object for climate data
+  temperature: 14,
+  co2Level: 400,
+  tempAnomaly: 0,
+  tempTime: '',
+  co2Time: '',
+  year: 2016
+};
 let pulseTimer = 0;
-let pulseSpeed = 0.8;
 let maxPulse = 20;
 let appStartYear = 2016; // Starting year for our visualization
+
+// Add baseline values for 2016
+const BASELINE_TEMP = 14.5;  // Approximate global temperature for 2016
+const BASELINE_CO2 = 404.21; // CO2 level for 2016
+const BASE_PULSE_SPEED = 0.05; // Base speed for 2016
 
 // Create default Earth images
 function preload() {
@@ -111,12 +123,28 @@ function setup() {
   slider.style('width', '480px');  // Made slightly smaller to accommodate new button
   slider.parent('container');
 
-  // Fetch the EPIC data initially
-  fetchEpicData(slider.value());
+  // Initialize climate data for the starting year
+  fetchClimateDataForYear(appStartYear + slider.value()).then(data => {
+    if (data) {
+      Object.assign(climateData, data);
+    }
+  });
   
-  // Slider event listener to update data when slider is moved
-  slider.input(() => {
-    fetchEpicData(slider.value());
+  // Modify slider event to update climate data
+  slider.input(async () => {
+    const sliderValue = slider.value();
+    const selectedYear = appStartYear + sliderValue;
+    console.log(`[Slider] Moved to year ${selectedYear}`);
+    
+    // Update climate data for the selected year
+    const data = await fetchClimateDataForYear(selectedYear);
+    if (data) {
+      Object.assign(climateData, data);
+      climateData.year = selectedYear;
+    }
+    
+    // Fetch EPIC image separately
+    await fetchEpicData(sliderValue);
   });
   
   // Label to explain the slider's functionality
@@ -127,7 +155,7 @@ function setup() {
   sliderLabel.parent('container');
   
   // Add API attribution
-  let attribution = createDiv('Data from NASA EPIC API (CO2 and temperature data simulated)');
+  let attribution = createDiv('Data from NASA EPIC API and global-warming.org');
   attribution.position(10, height - 30);
   attribution.style('color', 'white');
   attribution.style('font-size', '12px');
@@ -176,34 +204,60 @@ function setup() {
 }
 
 function draw() {
-  background(0);  // Set black background
+  background(0);
+  
+  // Update climate data every 60 frames (about every second)
+  if (frameCount % 60 === 0) {
+    console.log('[Draw] Requesting climate update, frame:', frameCount);
+    const selectedYear = appStartYear + slider.value();
+    fetchClimateDataForYear(selectedYear).then(data => {
+      if (data) {
+        const oldTemp = climateData.temperature;
+        const oldCO2 = climateData.co2Level;
+        
+        Object.assign(climateData, data);
+        climateData.year = selectedYear;
+        
+        console.log('[Draw] Updated climate data:', {
+          temperatureChange: `${oldTemp} -> ${data.temperature}`,
+          co2Change: `${oldCO2} -> ${data.co2Level}`,
+          year: selectedYear
+        });
+      }
+    });
+  }
 
-  // Adjust pulse speed based on environmental data
-  let co2 = epicData.co2Level || 400;  // Default to 400 if no data
-  let temp = epicData.temperature || 15;  // Default to 15°C if no data
-
-  // Use CO2 and temperature data to map to pulse speed
-  pulseSpeed = map(co2 + temp, 0, 1000, 0.4, 1.5);  // Adjust speed based on data
-
-  pulseTimer += pulseSpeed * 0.05;  // Slow it down to mimic a real heartbeat
-
-  // Earth pulsing effect based on the fetched image and pulse speed
+  // Calculate pulse effect based on temperature and CO2 levels
+  const tempFactor = map(climateData.temperature, BASELINE_TEMP, BASELINE_TEMP + 2, 1, 2);
+  const co2Factor = map(climateData.co2Level, BASELINE_CO2, BASELINE_CO2 + 50, 1, 2);
+  
+  // Combined factor affects both pulse size and speed
+  const combinedFactor = (tempFactor + co2Factor) / 2;
+  
+  // Calculate pulse size and Earth size
   let pulseSize = sin(pulseTimer) * maxPulse;
-  let earthSize = 300 + pulseSize;  // Pulsing effect based on size
-
-  // Create a glow effect for the Earth
-  drawEarthGlow(width/2, height/2, earthSize + 20, color(100, 150, 255, 50));
-
-  // Display Earth image
+  let earthSize = 300 + pulseSize;
+  
+  // Create a glow effect for the Earth with color based on temperature
+  const glowHue = map(climateData.temperature, BASELINE_TEMP, BASELINE_TEMP + 2, 180, 0); // Blue to Red
+  const glowColor = color(
+    map(glowHue, 0, 180, 255, 100), // Red component
+    map(glowHue, 0, 180, 0, 150),   // Green component
+    map(glowHue, 0, 180, 0, 255),   // Blue component
+    50                               // Alpha
+  );
+  
+  // Display Earth image with glow
   if (earthImage) {
+    // Draw the glow effect first
+    drawEarthGlow(width/2, height/2, earthSize + 20, glowColor);
+    
+    // Then draw the Earth image
     push();
     imageMode(CENTER);
-    translate(width / 2, height / 2);
-    
-    // Add a subtle rotation based on the timer for a more dynamic effect
-    rotate(pulseTimer * 0.02);
-    
-    image(earthImage, 0, 0, earthSize, earthSize);
+    translate(width/2, height/2);
+    rotate(pulseTimer * 0.02);  // Keep original rotation speed
+    image(earthImage, 0, 0, earthSize*1.3, earthSize*1.3);
     pop();
     
     // Display EPIC metadata if available
@@ -218,60 +272,80 @@ function draw() {
       }
     }
   } else {
-    fill(28, 60, 100);  // Default color if image isn't loaded
-    // ellipse(width / 2, height / 2, earthSize, earthSize);  // Draw Earth as a circle
+    // Draw the glow effect first
+    drawEarthGlow(width/2, height/2, earthSize + 20, glowColor);
+    
+    // Draw placeholder circle if image isn't loaded
+    fill(28, 60, 100);
+    noStroke();
+    ellipse(width/2, height/2, earthSize, earthSize);
+    
     fill(255);
     textSize(16);
     textAlign(CENTER);
-    text("Loading Earth Image...", width / 2, height / 2);
+    text("Loading Earth Image...", width/2, height/2);
   }
 
   // Create a semi-transparent overlay for data visualization
-  fill(0, 0, 0, 100); // Semi-transparent black rectangle
+  fill(0, 0, 0, 100);
   noStroke();
-  rect(10, 10, width - 20, 70, 10); // Rounded rectangle for data display
-
-  // Display CO2 and temperature data with nicer formatting
+  rect(10, 10, width - 20, 90, 10);
+  
+  // Display climate data with source timestamps
   fill(255);
   textSize(16);
   textAlign(LEFT, TOP);
-  text(`CO₂ Level: ${co2.toFixed(2)} ppm`, 20, 20);
   
-  // Add visual indicator for CO2 levels
-  const co2Width = map(co2, 400, 500, 100, 200);
-  fill(map(co2, 400, 500, 0, 255), map(co2, 400, 500, 255, 0), 0);
-  rect(180, 22, co2Width, 12, 5);
+  text(`Temperature: ${climateData.temperature.toFixed(2)}°C`, 20, 20);
+  if (climateData.tempTime) {
+    textSize(12);
+    text(`(Data from year ${climateData.tempTime})`, 20, 40);
+  }
   
-  text(`Temperature: ${temp.toFixed(2)}°C`, 20, 45);
+  textSize(16);
+  text(`CO₂ Level: ${climateData.co2Level.toFixed(2)} ppm`, 20, 60);
+  if (climateData.co2Time) {
+    textSize(12);
+    text(`(Data from ${climateData.co2Time})`, 20, 80);
+  }
   
-  // Add visual indicator for temperature
-  const tempWidth = map(temp, 14, 16, 100, 200);
-  fill(map(temp, 14, 16, 0, 255), 0, map(temp, 14, 16, 255, 0));
-  rect(180, 47, tempWidth, 12, 5);
+  // Add visual indicators for temperature and CO2
+  const tempWidth = map(climateData.temperature, 13, 16, 100, 200);
+  fill(map(climateData.temperature, 13, 16, 0, 255), 0, map(climateData.temperature, 13, 16, 255, 0));
+  rect(180, 22, tempWidth, 12, 5);
+  
+  const co2Width = map(climateData.co2Level, 380, 420, 100, 200);
+  fill(map(climateData.co2Level, 380, 420, 0, 255), map(climateData.co2Level, 380, 420, 255, 0), 0);
+  rect(180, 62, co2Width, 12, 5);
   
   // Show the year based on slider value with larger text
   const year = appStartYear + slider.value();
   fill(255);
   textSize(24);
   textAlign(CENTER, TOP);
-  text(`Earth in ${year}`, width / 2, 85);
+  text(`Earth in ${year}`, width/2, 85);
   
-  // Display pulsation speed in small text
+  // Display heartbeat in top right corner
+  const pulseSpeed = BASE_PULSE_SPEED * combinedFactor;
   fill(180);
-  textSize(12);
-  text(`Heartbeat: ${pulseSpeed.toFixed(2)}`, width / 2, 115);
+  textSize(14);
+  textAlign(RIGHT, TOP);
+  text(`Heartbeat: ${pulseSpeed.toFixed(2)}`, width - 20, 20);
+  
+  // Update pulse timer with dynamic speed
+  pulseTimer += pulseSpeed;
 }
 
-// Function to draw a glowing effect
+// Modify the drawEarthGlow function to create a more dynamic glow effect
 function drawEarthGlow(x, y, size, glowColor) {
   push();
   noStroke();
   // Draw multiple expanding circles with decreasing opacity
-  for (let i = 0; i < 5; i++) {
-    const glowSize = size + i * 2;
-    const opacity = map(i, 0, 5, 30, 0);
+  for (let i = 0; i < 8; i++) {
+    const glowSize = size + i * 3;
+    const opacity = map(i, 0, 8, 50, 0);
     fill(red(glowColor), green(glowColor), blue(glowColor), opacity);
-    // ellipse(x, y, glowSize, glowSize);
+    ellipse(x, y, glowSize, glowSize);
   }
   pop();
 }
@@ -449,82 +523,109 @@ function testNasaApi() {
     });
 }
 
-// Modify the fetchEpicData function to use the proxy
-function fetchEpicData(sliderValue) {
+// New function to fetch climate data for a specific year
+async function fetchClimateDataForYear(year) {
+  console.log(`[Climate] Fetching climate data for year ${year}...`);
+  try {
+    // Fetch temperature data
+    const tempResponse = await fetch('https://global-warming.org/api/temperature-api');
+    const tempData = await tempResponse.json();
+    
+    // Fetch CO2 data
+    const co2Response = await fetch('https://global-warming.org/api/co2-api');
+    const co2Data = await co2Response.json();
+    
+    if (!tempData.result || !co2Data.co2) {
+      throw new Error('Invalid data received from climate APIs');
+    }
+    
+    // Find temperature data closest to the selected year
+    const targetYearDecimal = year + 0.5; // Middle of the year
+    const tempDataPoint = tempData.result.reduce((closest, current) => {
+      return Math.abs(parseFloat(current.time) - targetYearDecimal) < 
+             Math.abs(parseFloat(closest.time) - targetYearDecimal) ? current : closest;
+    });
+    
+    // Find CO2 data closest to the selected year
+    const co2DataPoint = co2Data.co2.reduce((closest, current) => {
+      return Math.abs(parseInt(current.year) - year) < 
+             Math.abs(parseInt(closest.year) - year) ? current : closest;
+    });
+    
+    const result = {
+      temperature: 14 + parseFloat(tempDataPoint.station),
+      co2Level: parseFloat(co2DataPoint.cycle),
+      tempAnomaly: parseFloat(tempDataPoint.station),
+      tempTime: tempDataPoint.time,
+      co2Time: `${co2DataPoint.year}-${co2DataPoint.month}-${co2DataPoint.day}`
+    };
+    
+    console.log(`[Climate] Found data for year ${year}:`, result);
+    return result;
+  } catch (error) {
+    console.error(`[Climate] Error fetching data for year ${year}:`, error);
+    return null;
+  }
+}
+
+// Modify fetchEpicData to only handle image data
+async function fetchEpicData(sliderValue) {
+  console.log('[EPIC] Fetching image data for slider value:', sliderValue);
   const apiKey = "XVbWVugQF44fR70E1zijo79TcsrNJEP61Sx3EzWB";
   const epicDate = getEpicDateFromSlider(sliderValue);
   
-  // Use the proxy server to fetch EPIC API data
-  const url = `http://localhost:3000/epic-api?date=${epicDate}&apiKey=${apiKey}`;
-  
-  fetch(url)
-    .then(response => {
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
-      }
-      return response.json();
-    })
-    .then(data => {
-      if (data && data.length > 0) {
-        epicData = data[0];
-        
-        // Extract date parts for image URL construction
-        const dateStr = epicData.date.substring(0, 10);
-        const dateParts = dateStr.split('-');
-        const year = dateParts[0];
-        const month = dateParts[1];
-        const day = dateParts[2];
-        
-        // Now load the image using the proxy
-        const proxyImageUrl = `http://localhost:3000/epic-image?year=${year}&month=${month}&day=${day}&imageName=${epicData.image}`;
-        
-        loadImage(proxyImageUrl, img => {
-          earthImage = img;  // Now we can use the actual NASA image!
-        }, (err) => {
-          console.error("Failed to load Earth image", err);
-          // Fall back to our generated Earth images
-          const yearIndex = int(sliderValue) % earthImages.length;
-          earthImage = earthImages[yearIndex];
-        });
-        
-        // Calculate environmental data based on year
-        const selectedYear = appStartYear + sliderValue;
-        epicData.co2Level = 400 + ((selectedYear - 2015) * 2.5);
-        epicData.temperature = 14 + ((selectedYear - 2015) * 0.02);
-        
-        if (selectedYear > 2020) {
-          epicData.temperature += (selectedYear - 2020) * 0.03;
-        }
-        
-        epicData.formattedDate = dateStr;
-      } else {
-        console.log("No EPIC data available for this date");
-        generateFallbackData(sliderValue);
-      }
-    })
-    .catch(error => {
-      console.error('Error fetching EPIC data:', error);
+  try {
+    const url = `http://localhost:3000/epic-api?date=${epicDate}&apiKey=${apiKey}`;
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      throw new Error(`API returned ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (data && data.length > 0) {
+      epicData = data[0];
+      
+      // Extract date parts for image URL construction
+      const dateStr = epicData.date.substring(0, 10);
+      const dateParts = dateStr.split('-');
+      const year = dateParts[0];
+      const month = dateParts[1];
+      const day = dateParts[2];
+      
+      // Load the image using the proxy
+      const proxyImageUrl = `http://localhost:3000/epic-image?year=${year}&month=${month}&day=${day}&imageName=${epicData.image}`;
+      
+      loadImage(proxyImageUrl, img => {
+        earthImage = img;
+      }, (err) => {
+        console.error("Failed to load Earth image", err);
+        const yearIndex = int(sliderValue) % earthImages.length;
+        earthImage = earthImages[yearIndex];
+      });
+      
+      epicData.formattedDate = dateStr;
+    } else {
+      console.log('[EPIC] No image data available, using fallback');
       generateFallbackData(sliderValue);
-    });
+    }
+  } catch (error) {
+    console.error('[EPIC] Error:', error);
+    generateFallbackData(sliderValue);
+  }
 }
 
+// Modify generateFallbackData to only handle EPIC image data
 function generateFallbackData(sliderValue) {
-  // Generate fallback data if API call fails
   const selectedYear = appStartYear + sliderValue;
   
   epicData = {
     date: `${selectedYear}-03-07T00:00:00.000Z`,
     formattedDate: `${selectedYear}-03-07`,
     image: "fallback",
-    centroid_coordinates: { lat: 0, lon: 0 },
-    co2Level: 400 + ((selectedYear - 2015) * 2.5),
-    temperature: 14 + ((selectedYear - 2015) * 0.02)
+    centroid_coordinates: { lat: 0, lon: 0 }
   };
-  
-  // Add extra temperature rise after 2020 to simulate accelerating climate change
-  if (selectedYear > 2020) {
-    epicData.temperature += (selectedYear - 2020) * 0.03;
-  }
   
   // Use one of our generated Earth images
   const yearIndex = int(sliderValue) % earthImages.length;
